@@ -1,0 +1,634 @@
+
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>METRO_COMMAND // 大都會捷運與營運戰情總控台</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              dark: '#030712',
+              card: '#0b1329',
+              border: '#1e3a8a',
+              neonGreen: '#22c55e',
+              neonBlue: '#38bdf8',
+              warningRed: '#ef4444',
+              accentYellow: '#f59e0b'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Google Fonts: JetBrains Mono & Orbitron -->
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background-color: #030712;
+      color: #38bdf8;
+      overflow-x: hidden;
+    }
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    /* 電影感掃描線與 CRT 雜訊濾鏡 */
+    .scanline {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0, 0, 0, 0.35) 50%, rgba(0, 0, 0, 0.35));
+      background-size: 100% 4px;
+      z-index: 999;
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    .crt-glow {
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2), inset 0 0 15px rgba(56, 189, 248, 0.08);
+    }
+    .text-glow-green { text-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+    .text-glow-blue { text-shadow: 0 0 8px rgba(56, 189, 248, 0.6); }
+    .text-glow-red { text-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+    #matrixRain {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      z-index: -1;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #030712; }
+    ::-webkit-scrollbar-thumb { background: #1e3a8a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
+    @keyframes radarScan {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .radar-sweep { animation: radarScan 3s linear infinite; }
+    .glitch-effect { animation: glitch 0.25s infinite; }
+    @keyframes glitch {
+      0% { transform: translate(0); filter: hue-rotate(0deg); }
+      20% { transform: translate(-3px, 2px); filter: hue-rotate(90deg); }
+      40% { transform: translate(-2px, -2px); filter: hue-rotate(180deg); }
+      60% { transform: translate(3px, 1px); filter: hue-rotate(270deg); }
+      80% { transform: translate(1px, -2px); filter: hue-rotate(45deg); }
+      100% { transform: translate(0); filter: hue-rotate(0deg); }
+    }
+    @keyframes pulseText {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .dynamic-pulse { animation: pulseText 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-200 relative p-3 lg:p-5 flex flex-col justify-between">
+
+  <!-- 背景科技特效 -->
+  <canvas id="matrixRain" aria-hidden="true"></canvas>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <!-- 主容器 -->
+  <div class="max-w-[1600px] w-full mx-auto flex flex-col gap-3">
+
+    <!-- 頂部指揮官狀態列 -->
+    <header class="bg-cyber-card border border-cyber-border rounded-xl p-3 lg:p-4 flex flex-col md:flex-row justify-between items-center crt-glow gap-4">
+      <div>
+        <div class="text-xs text-cyber-neonGreen font-bold tracking-widest uppercase flex items-center gap-2 text-glow-green">
+          <span class="w-2 h-2 rounded-full bg-cyber-neonGreen animate-ping"></span>
+          <span id="headerProtocol" class="font-mono">SECURE_CHANNEL // PROTOCOL_V9.4.2</span>
+        </div>
+        <h1 class="text-xl lg:text-2xl font-orbitron font-black text-white tracking-wider mt-1 text-glow-blue">
+          大都會捷運 / 戰情總控指揮中心
+        </h1>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-mono">
+          SYSTEM_STATUS: <span class="text-cyber-neonGreen font-bold">ACTIVE_HIGH_LOAD</span> | ENCRYPTION: AES-256-GCM
+        </p>
+      </div>
+
+      <!-- 頂部即時狀態與切換按鈕 -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <button id="btnV1" class="px-3 py-1.5 text-xs font-bold rounded bg-cyber-neonGreen text-black transition shadow-[0_0_12px_rgba(34,197,94,0.6)]">
+          V1 戰情總控
+        </button>
+        <button id="btnV2" class="px-3 py-1.5 text-xs font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition border border-cyber-border">
+          V2 八區塊牆
+        </button>
+        <button id="btnGlitchToggle" class="px-3 py-1.5 text-xs font-bold rounded bg-red-950 text-red-400 border border-red-800 hover:bg-red-900 transition">
+          BLACK_ICE 防禦
+        </button>
+        <div class="bg-black/70 border border-cyber-border px-3.5 py-1.5 rounded text-right">
+          <div id="clockTime" class="font-orbitron text-base font-bold text-cyber-neonGreen tracking-widest text-glow-green">--:--:--</div>
+          <small id="clockDate" class="text-[9px] text-slate-400 font-mono">----/--/-- UTC+8</small>
+        </div>
+      </div>
+    </header>
+
+    <!-- 頂部跑馬燈公告 -->
+    <div class="bg-blue-950/50 border border-cyber-border rounded-lg px-4 py-2 text-xs flex items-center gap-3 overflow-hidden whitespace-nowrap">
+      <span class="text-cyber-warningRed font-bold flex items-center gap-1 shrink-0 text-glow-red animate-pulse">
+        <span class="w-1.5 h-1.5 rounded-full bg-cyber-warningRed animate-ping"></span> LIVE_FEED:
+      </span>
+      <div class="text-slate-300 tracking-wide font-mono">
+        [系統公告] 紅線車次訊號同步正常 ｜ 智慧商情 AI 演算模組全線運作中 ｜ 密鑰防護等級：Level-9 ｜ 核心負載率即時浮動中。
+      </div>
+    </div>
+
+    <!-- V1 視圖：三欄式戰情室格線 -->
+    <section id="viewV1" class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+
+      <!-- 左側：捷運幹線與號誌監控 (佔 3 欄) -->
+      <div class="lg:col-span-3 flex flex-col gap-3">
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col gap-3">
+          <div class="text-xs font-bold text-cyber-neonBlue flex items-center justify-between border-b border-cyber-border/50 pb-2 text-glow-blue">
+            <span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-cyber-neonBlue animate-pulse"></span> 幹線發車與號誌監控</span>
+            <span id="lineCodeId" class="text-[10px] text-slate-400 font-mono">ID: 0x8892</span>
+          </div>
+          <!-- 幹線列表 -->
+          <div class="flex flex-col gap-2.5 text-xs">
+            <div class="bg-black/50 p-2.5 rounded border border-slate-800">
+              <div class="flex justify-between font-bold mb-1"><span>RED-LINE 紅線</span><span class="text-cyber-neonGreen dynamic-pulse">ON_TIME</span></div>
+              <div class="w-full bg-slate-900 h-1.5 rounded overflow-hidden"><div id="barRed" class="bg-cyber-neonGreen h-full w-[88%] transition-all duration-300"></div></div>
+              <div class="flex justify-between text-[10px] text-slate-400 mt-1 font-mono"><span>頻率：3.5m</span><span>負載：<b id="valRedLoad" class="text-white">88%</b></span></div>
+            </div>
+            <div class="bg-black/50 p-2.5 rounded border border-slate-800">
+              <div class="flex justify-between font-bold mb-1"><span>BLUE-LINE 藍線</span><span class="text-cyber-neonGreen dynamic-pulse">STABLE</span></div>
+              <div class="w-full bg-slate-900 h-1.5 rounded overflow-hidden"><div id="barBlue" class="bg-cyber-neonBlue h-full w-[74%] transition-all duration-300"></div></div>
+              <div class="flex justify-between text-[10px] text-slate-400 mt-1 font-mono"><span>頻率：4.0m</span><span>負載：<b id="valBlueLoad" class="text-white">74%</b></span></div>
+            </div>
+            <div class="bg-black/50 p-2.5 rounded border border-slate-800">
+              <div class="flex justify-between font-bold mb-1"><span>GREEN-LINE 綠線</span><span class="text-cyber-accentYellow dynamic-pulse">HEAVY</span></div>
+              <div class="w-full bg-slate-900 h-1.5 rounded overflow-hidden"><div id="barGreen" class="bg-cyber-accentYellow h-full w-[95%] transition-all duration-300"></div></div>
+              <div class="flex justify-between text-[10px] text-slate-400 mt-1 font-mono"><span>頻率：2.5m</span><span>負載：<b id="valGreenLoad" class="text-white">95%</b></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 實時十六進位數據流 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex-1 flex flex-col">
+          <div class="text-xs font-bold text-cyber-neonGreen flex items-center justify-between border-b border-cyber-border/50 pb-2 mb-2 text-glow-green">
+            <span>HEX_STREAM_LOG</span>
+            <span class="text-[10px] animate-pulse text-emerald-400">ENCRYPTED</span>
+          </div>
+          <div id="hexStream" class="font-mono text-[10px] text-emerald-400/80 h-32 overflow-hidden leading-tight flex flex-col justify-end">
+            <div>0x4F9A 7C21 88EE 3A10</div>
+            <div>0x91F0 C42B 11FE 55E2</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 中間：核心雷達、危機警報與互動操作 (佔 6 欄) -->
+      <div class="lg:col-span-6 flex flex-col gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <!-- 雷達掃描面板 -->
+          <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col items-center justify-center relative overflow-hidden">
+            <div class="absolute top-3 left-3 text-xs font-bold text-cyber-neonBlue flex items-center gap-2 text-glow-blue">
+              <span class="w-2 h-2 rounded-full bg-cyber-neonBlue animate-ping"></span> 核心雷達掃描
+            </div>
+            <div class="w-32 h-32 rounded-full border border-cyber-neonBlue/40 relative flex items-center justify-center my-3">
+              <div class="absolute inset-0 rounded-full border border-cyber-neonBlue/20 scale-75"></div>
+              <div class="absolute inset-0 rounded-full border border-cyber-neonBlue/10 scale-50"></div>
+              <div class="absolute w-full h-[1px] bg-cyber-neonBlue/30"></div>
+              <div class="absolute h-full w-[1px] bg-cyber-neonBlue/30"></div>
+              <div class="absolute w-1/2 h-1/2 top-0 right-0 origin-bottom-left bg-gradient-to-tr from-transparent to-cyber-neonGreen/30 rounded-tr-full radar-sweep"></div>
+              <div class="w-3 h-3 bg-cyber-warningRed rounded-full absolute top-8 right-10 animate-ping"></div>
+              <div class="w-2 h-2 bg-cyber-neonGreen rounded-full absolute bottom-6 left-8"></div>
+              <div class="text-[10px] font-orbitron text-cyber-neonBlue font-bold">SECOR-07</div>
+            </div>
+            <div class="text-[11px] text-slate-400 flex gap-4 font-mono">
+              <span>目標物件：<b id="radarTargets" class="text-white">14 班次</b></span>
+              <span>異常狀態：<b id="radarAlerts" class="text-cyber-warningRed text-glow-red">1 處警報</b></span>
+            </div>
+          </div>
+
+          <!-- 危機警報與緊急按鈕面板 -->
+          <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+            <div>
+              <div class="text-xs font-bold text-cyber-warningRed flex items-center gap-2 border-b border-cyber-border/50 pb-2 mb-2.5 text-glow-red">
+                <span class="w-2 h-2 rounded-full bg-cyber-warningRed animate-pulse"></span> 緊急危機控制
+              </div>
+              <div class="bg-red-950/30 border border-red-900/60 p-2.5 rounded mb-3 text-xs">
+                <div class="text-red-400 font-bold flex items-center justify-between">
+                  <span>⚠️ SECTOR 04 變電所過載</span>
+                  <span class="font-mono text-[10px]">00:45</span>
+                </div>
+                <div class="text-slate-400 text-[10px] mt-0.5">負載率高達 <b id="overloadVal" class="text-white font-mono">94.2%</b>，請執行負載平衡。</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="btnSync" class="bg-blue-900/40 hover:bg-blue-800 text-cyber-neonBlue border border-cyber-border text-xs font-bold py-2 px-3 rounded transition shadow-[0_0_10px_rgba(56,189,248,0.3)] active:scale-95">
+                ⚡ 強制發車同步
+              </button>
+              <button id="btnLockdown" class="bg-red-950/70 hover:bg-red-900 text-cyber-warningRed border border-red-800 text-xs font-bold py-2 px-3 rounded transition shadow-[0_0_10px_rgba(239,68,68,0.4)] active:scale-95">
+                🛑 全線緊急制動
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 頻譜儀動態等化器 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col gap-2.5">
+          <div class="text-xs font-bold text-cyber-neonGreen flex items-center justify-between text-glow-green">
+            <span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-cyber-neonGreen animate-pulse"></span> 戰情音頻頻譜 / 即時通訊監控</span>
+            <span class="text-[10px] text-slate-400 font-mono">CH-09 SECURE</span>
+          </div>
+          <div id="audioEqualizer" class="flex items-end justify-between gap-1 h-14 bg-black/50 p-2 rounded border border-slate-800"></div>
+        </div>
+      </div>
+
+      <!-- 右側：指揮官戰術終端機 (佔 3 欄) -->
+      <div class="lg:col-span-3 flex flex-col gap-3">
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex-1 flex flex-col min-h-[400px]">
+          <div class="text-xs font-bold text-cyber-neonGreen flex items-center justify-between border-b border-cyber-border/50 pb-2 mb-2 text-glow-green">
+            <span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-cyber-neonGreen animate-ping"></span> 指揮官戰術終端機</span>
+            <span class="text-[10px] text-slate-400 font-mono">CLI v4.2</span>
+          </div>
+          <div id="terminalLog" class="flex-1 bg-black/70 border border-slate-800 rounded p-2.5 font-mono text-xs overflow-y-auto max-h-[320px] flex flex-col gap-1.5 text-slate-300">
+            <div><span class="text-cyber-neonGreen font-bold">[SYS]</span> Secure Terminal Initialized.</div>
+            <div><span class="text-cyber-neonGreen font-bold">[SYS]</span> Type <span class="text-cyber-neonBlue font-bold">'help'</span> for available commands.</div>
+          </div>
+          <div class="mt-2 flex gap-2">
+            <span class="text-cyber-neonGreen font-bold flex items-center text-xs text-glow-green">></span>
+            <input id="terminalInput" type="text" placeholder="輸入指令 (例: status, override, scan)..." class="flex-1 bg-black/90 border border-cyber-border rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyber-neonGreen font-mono">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- V2 視圖：八區塊營運牆 (數字全自動隨機跳動) -->
+    <section id="viewV2" class="hidden flex flex-col gap-3">
+      <div class="bg-cyber-card border border-cyber-border rounded-xl p-4 crt-glow flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div class="text-xs font-bold text-cyber-neonGreen flex items-center gap-2 text-glow-green">
+            <span class="w-2 h-2 rounded-full bg-cyber-neonGreen"></span> EIGHT-DOMAIN CAMPUS INTELLIGENCE WALL
+          </div>
+          <h2 class="text-lg font-orbitron font-bold text-white mt-1 text-glow-blue">八區塊校園營運智慧牆</h2>
+          <p class="text-xs text-slate-400 mt-0.5">慈濟大學智慧商情研究室即時營運監控、環境與決策支援多維度動態展示。</p>
+        </div>
+        <div class="flex gap-4 text-xs bg-black/50 px-4 py-2 rounded border border-cyber-border font-mono">
+          <span>Live pulse: <b id="v2Pulse" class="text-cyber-neonGreen">98.4%</b></span>
+          <span>Decision index: <b id="v2Decision" class="text-cyber-neonBlue">92.1</b></span>
+          <span>Signal scan: <b id="v2Signal" class="text-cyber-accentYellow">ACTIVE</b></span>
+        </div>
+      </div>
+
+      <!-- 八區塊 Grid (全動態數值綁定) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <!-- 01 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">01 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Campus Live Pulse<br><span class="text-xs text-slate-400">校園即時脈動</span></h3>
+            <div class="my-3 space-y-1 text-xs">
+              <p class="flex justify-between">人流估計 <b id="d1People" class="text-cyber-neonGreen font-mono">1,420 員</b></p>
+              <p class="flex justify-between">Wi‑Fi 裝置 <b id="d1Wifi" class="text-cyber-neonBlue font-mono">2,189 台</b></p>
+              <p class="flex justify-between">噪音分貝 <b id="d1Noise" class="text-slate-300 font-mono">42.5 dB</b></p>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div class="bg-cyber-neonGreen h-full w-[82%]"></div></div>
+        </div>
+
+        <!-- 02 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">02 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Operation Map<br><span class="text-xs text-slate-400">校園營運地圖</span></h3>
+            <div class="my-3 space-y-1 text-xs">
+              <p class="flex justify-between">清潔任務 <b id="d2Clean" class="text-cyber-neonGreen">SYNCED</b></p>
+              <p class="flex justify-between">教室使用率 <b id="d2Room" class="text-cyber-neonBlue font-mono">76.4%</b></p>
+              <p class="flex justify-between">停車剩餘 <b id="d2Park" class="text-cyber-accentYellow font-mono">34 車位</b></p>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div class="bg-cyber-neonBlue h-full w-[65%]"></div></div>
+        </div>
+
+        <!-- 03 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">03 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Business Intelligence Stream<br><span class="text-xs text-slate-400">商情訊號流</span></h3>
+            <div class="my-3 space-y-1 text-[11px] text-slate-300 font-mono">
+              <div id="d3Signal1" class="truncate">[INFO] 智慧商情模組運行正常</div>
+              <div id="d3Signal2" class="truncate">[DATA] 流量峰值出現在 12:00</div>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div class="bg-cyber-accentYellow h-full w-[90%]"></div></div>
+        </div>
+
+        <!-- 04 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">04 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Facility Management<br><span class="text-xs text-slate-400">設施管理</span></h3>
+            <div class="my-3 space-y-2 text-xs">
+              <div>
+                <div class="flex justify-between text-[11px] mb-0.5"><span>空調負載</span><span id="d4AirVal" class="font-mono">84%</span></div>
+                <div class="w-full bg-slate-900 h-1.5 rounded"><div id="d4AirBar" class="bg-cyber-warningRed h-full w-[84%]"></div></div>
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] mb-0.5"><span>照明效率</span><span id="d4LightVal" class="font-mono">95%</span></div>
+                <div class="w-full bg-slate-900 h-1.5 rounded"><div id="d4LightBar" class="bg-cyber-neonGreen h-full w-[95%]"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="text-[10px] text-slate-400 text-right">維修處理：正常</div>
+        </div>
+
+        <!-- 05 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">05 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Learning Analytics<br><span class="text-xs text-slate-400">學習分析</span></h3>
+            <div class="my-3 space-y-1 text-xs">
+              <p class="flex justify-between">LMS 登入 <b id="d5Lms" class="text-cyber-neonGreen font-mono">1,890 人</b></p>
+              <p class="flex justify-between">作業繳交率 <b id="d5Submit" class="text-cyber-neonBlue font-mono">91.2%</b></p>
+              <p class="flex justify-between">教材點閱 <b id="d5Views" class="text-slate-300 font-mono">14,200 次</b></p>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div class="bg-cyber-neonGreen h-full w-[91%]"></div></div>
+        </div>
+
+        <!-- 06 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">06 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">System Monitor<br><span class="text-xs text-slate-400">系統監控</span></h3>
+            <div class="my-3 space-y-1 text-xs font-mono">
+              <p class="flex justify-between">API req/s <b id="d6Api" class="text-cyber-neonGreen">342.5</b></p>
+              <p class="flex justify-between">DB query/s <b id="d6Db" class="text-cyber-neonBlue">1,240</b></p>
+              <p class="flex justify-between">CPU load <b id="d6Cpu" class="text-cyber-warningRed">48.2%</b></p>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div id="d6CpuBar" class="bg-cyber-warningRed h-full w-[48%]"></div></div>
+        </div>
+
+        <!-- 07 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">07 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Environmental Intelligence<br><span class="text-xs text-slate-400">環境智慧監測</span></h3>
+            <div class="my-3 space-y-1 text-xs">
+              <p class="flex justify-between">CO₂ 濃度 <b id="d7Co2" class="text-cyber-neonGreen font-mono">480 ppm</b></p>
+              <p class="flex justify-between">PM2.5 <b id="d7Pm" class="text-cyber-neonBlue font-mono">12.4 ug/m³</b></p>
+              <p class="flex justify-between">溫濕度 <b id="d7Temp" class="text-slate-300 font-mono">24.5°C / 62%</b></p>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div class="bg-cyber-neonGreen h-full w-[70%]"></div></div>
+        </div>
+
+        <!-- 08 -->
+        <div class="bg-cyber-card border border-cyber-border rounded-xl p-3.5 crt-glow flex flex-col justify-between">
+          <div>
+            <div class="text-[10px] text-cyber-neonBlue font-bold">08 / DOMAIN</div>
+            <h3 class="font-bold text-sm text-white mt-1">Decision Support Index<br><span class="text-xs text-slate-400">決策支援指標</span></h3>
+            <div class="my-3 flex items-center justify-between">
+              <div>
+                <p class="text-xs text-slate-400">綜合評分子指數</p>
+                <div id="d8Index" class="text-2xl font-orbitron font-bold text-cyber-neonGreen mt-1 text-glow-green font-mono">94.8</div>
+              </div>
+              <div class="text-right text-[11px] space-y-0.5 text-slate-300 font-mono">
+                <p>空間效率: <b id="d8Space" class="text-white">92%</b></p>
+                <p>能源效率: <b id="d8Energy" class="text-white">89%</b></p>
+              </div>
+            </div>
+          </div>
+          <div class="h-1 bg-slate-900 rounded overflow-hidden"><div id="d8Bar" class="bg-cyber-neonGreen h-full w-[95%]"></div></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- JavaScript 動態與互動邏輯 -->
+  <script>
+    // 即時時鐘
+    function updateClock() {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0];
+      const dateStr = now.toISOString().split('T')[0].replace(/-/g, '/');
+      document.getElementById('clockTime').textContent = timeStr;
+      document.getElementById('clockDate').textContent = dateStr + ' UTC+8';
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // 視圖切換
+    const btnV1 = document.getElementById('btnV1');
+    const btnV2 = document.getElementById('btnV2');
+    const viewV1 = document.getElementById('viewV1');
+    const viewV2 = document.getElementById('viewV2');
+
+    btnV1.addEventListener('click', () => {
+      viewV1.classList.remove('hidden');
+      viewV2.classList.add('hidden');
+      btnV1.className = 'px-3 py-1.5 text-xs font-bold rounded bg-cyber-neonGreen text-black transition shadow-[0_0_12px_rgba(34,197,94,0.6)]';
+      btnV2.className = 'px-3 py-1.5 text-xs font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition border border-cyber-border';
+    });
+
+    btnV2.addEventListener('click', () => {
+      viewV2.classList.remove('hidden');
+      viewV1.classList.add('hidden');
+      btnV2.className = 'px-3 py-1.5 text-xs font-bold rounded bg-cyber-neonBlue text-black transition shadow-[0_0_12px_rgba(56,189,248,0.6)]';
+      btnV1.className = 'px-3 py-1.5 text-xs font-bold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition border border-cyber-border';
+    });
+
+    // BLACK_ICE 防禦按鈕
+    const btnGlitchToggle = document.getElementById('btnGlitchToggle');
+    let isGlitching = false;
+    btnGlitchToggle.addEventListener('click', () => {
+      isGlitching = !isGlitching;
+      if (isGlitching) {
+        document.body.classList.add('glitch-effect');
+        btnGlitchToggle.className = 'px-3 py-1.5 text-xs font-bold rounded bg-red-600 text-white animate-pulse border border-white';
+        btnGlitchToggle.textContent = 'BLACK_ICE 啟動中';
+        appendTerminalLog('[ALERT] Black Ice Countermeasure activated! Firewall hardened.');
+      } else {
+        document.body.classList.remove('glitch-effect');
+        btnGlitchToggle.className = 'px-3 py-1.5 text-xs font-bold rounded bg-red-950 text-red-400 border border-red-800 hover:bg-red-900 transition';
+        btnGlitchToggle.textContent = 'BLACK_ICE 防禦';
+        appendTerminalLog('[SYS] Firewall restored to standard mode.');
+      }
+    });
+
+    document.getElementById('btnSync').addEventListener('click', () => {
+      appendTerminalLog('[ACTION] 強制發車同步指令已廣播至各月台節點。', 'text-cyber-neonBlue');
+    });
+    document.getElementById('btnLockdown').addEventListener('click', () => {
+      appendTerminalLog('[CRITICAL] 全線緊急制動已觸發！所有列車進入備用煞車迴路。', 'text-cyber-warningRed');
+    });
+
+    // 終端機指令互動
+    const terminalInput = document.getElementById('terminalInput');
+    const terminalLog = document.getElementById('terminalLog');
+
+    function appendTerminalLog(text, colorClass = 'text-slate-300') {
+      const div = document.createElement('div');
+      div.className = colorClass;
+      div.innerHTML = text;
+      terminalLog.appendChild(div);
+      terminalLog.scrollTop = terminalLog.scrollHeight;
+    }
+
+    terminalInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = terminalInput.value.trim();
+        if (!val) return;
+        appendTerminalLog(`> ${val}`, 'text-cyber-neonGreen font-bold');
+        terminalInput.value = '';
+
+        const cmd = val.toLowerCase();
+        if (cmd === 'help') {
+          appendTerminalLog('可用指令: status, override, lockdown, scan, clear');
+        } else if (cmd === 'status') {
+          appendTerminalLog('[STATUS] 全線運作正常。核心溫度: 42.1°C, 記憶體佔用: 34.2%');
+        } else if (cmd === 'override') {
+          appendTerminalLog('[SUCCESS] 遠端控制覆寫成功，指揮官權限已提升至最高級別。', 'text-cyber-neonBlue');
+        } else if (cmd === 'lockdown') {
+          appendTerminalLog('[CRITICAL] 啟動全線緊急鎖定程序...', 'text-cyber-warningRed');
+        } else if (cmd === 'scan') {
+          appendTerminalLog('[SCAN] 正在全面掃描周邊網絡端口... 發現 0 處弱點。', 'text-emerald-400');
+        } else if (cmd === 'clear') {
+          terminalLog.innerHTML = '';
+        } else {
+          appendTerminalLog(`[ERROR] 未知指令 '${val}'。輸入 'help' 查看指令清單。`, 'text-cyber-warningRed');
+        }
+      }
+    });
+
+    // ==========================================
+    // 動態數據高頻隨機跳動引擎 (V1 + V2 全面數值隨機化)
+    // ==========================================
+    setInterval(() => {
+      // 1. 左側幹線負載
+      const redLoad = Math.floor(82 + Math.random() * 15);
+      const blueLoad = Math.floor(68 + Math.random() * 20);
+      const greenLoad = Math.floor(88 + Math.random() * 11);
+
+      document.getElementById('valRedLoad').textContent = redLoad + '%';
+      document.getElementById('valBlueLoad').textContent = blueLoad + '%';
+      document.getElementById('valGreenLoad').textContent = greenLoad + '%';
+
+      document.getElementById('barRed').style.width = redLoad + '%';
+      document.getElementById('barBlue').style.width = blueLoad + '%';
+      document.getElementById('barGreen').style.width = greenLoad + '%';
+
+      // 2. 系統識別 ID 與過載數值
+      document.getElementById('lineCodeId').textContent = 'ID: 0x' + Math.floor(Math.random() * 65535).toString(16).toUpperCase();
+      document.getElementById('overloadVal').textContent = (92 + Math.random() * 7).toFixed(1) + '%';
+      document.getElementById('radarTargets').textContent = Math.floor(12 + Math.random() * 6) + ' 班次';
+
+      // 3. V2 八區塊動態隨機跳動數值
+      document.getElementById('d1People').textContent = Math.floor(1300 + Math.random() * 300) + ' 員';
+      document.getElementById('d1Wifi').textContent = Math.floor(2000 + Math.random() * 400) + ' 台';
+      document.getElementById('d1Noise').textContent = (40 + Math.random() * 8).toFixed(1) + ' dB';
+
+      document.getElementById('d2Room').textContent = (70 + Math.random() * 20).toFixed(1) + '%';
+      document.getElementById('d2Park').textContent = Math.floor(20 + Math.random() * 30) + ' 車位';
+
+      const airVal = Math.floor(75 + Math.random() * 20);
+      document.getElementById('d4AirVal').textContent = airVal + '%';
+      document.getElementById('d4AirBar').style.width = airVal + '%';
+
+      const lightVal = Math.floor(88 + Math.random() * 11);
+      document.getElementById('d4LightVal').textContent = lightVal + '%';
+      document.getElementById('d4LightBar').style.width = lightVal + '%';
+
+      document.getElementById('d5Lms').textContent = Math.floor(1700 + Math.random() * 400) + ' 人';
+      document.getElementById('d5Submit').textContent = (88 + Math.random() * 10).toFixed(1) + '%';
+      document.getElementById('d5Views').textContent = (13000 + Math.floor(Math.random() * 2500)).toLocaleString() + ' 次';
+
+      document.getElementById('d6Api').textContent = (320 + Math.random() * 60).toFixed(1);
+      document.getElementById('d6Db').textContent = Math.floor(1100 + Math.random() * 300);
+      const cpuVal = (42 + Math.random() * 25).toFixed(1);
+      document.getElementById('d6Cpu').textContent = cpuVal + '%';
+      document.getElementById('d6CpuBar').style.width = cpuVal + '%';
+
+      document.getElementById('d7Co2').textContent = Math.floor(450 + Math.random() * 80) + ' ppm';
+      document.getElementById('d7Pm').textContent = (10 + Math.random() * 8).toFixed(1) + ' ug/m³';
+      document.getElementById('d7Temp').textContent = (23 + Math.random() * 3).toFixed(1) + '°C / ' + Math.floor(55 + Math.random() * 15) + '%';
+
+      const indexVal = (91 + Math.random() * 7).toFixed(1);
+      document.getElementById('d8Index').textContent = indexVal;
+      document.getElementById('d8Bar').style.width = indexVal + '%';
+      document.getElementById('d8Space').textContent = Math.floor(88 + Math.random() * 10) + '%';
+      document.getElementById('d8Energy').textContent = Math.floor(85 + Math.random() * 12) + '%';
+
+      // 4. 右側 Hex 數據流捲動
+      const hexStream = document.getElementById('hexStream');
+      if (hexStream) {
+        const hex1 = '0x' + Math.floor(Math.random()*16777215).toString(16).toUpperCase();
+        const hex2 = '0x' + Math.floor(Math.random()*16777215).toString(16).toUpperCase();
+        const newDiv = document.createElement('div');
+        newDiv.textContent = `${hex1} ${hex2} [SYNC]`;
+        hexStream.appendChild(newDiv);
+        if (hexStream.children.length > 5) {
+          hexStream.removeChild(hexStream.firstChild);
+        }
+      }
+    }, 900);
+
+    // 頻譜儀動態等化器條
+    const eqContainer = document.getElementById('audioEqualizer');
+    const barsCount = 28;
+    const bars = [];
+    for (let i = 0; i < barsCount; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'flex-1 bg-cyber-neonGreen/80 rounded-t transition-all duration-100';
+      bar.style.height = '20%';
+      eqContainer.appendChild(bar);
+      bars.push(bar);
+    }
+    setInterval(() => {
+      bars.forEach(bar => {
+        const randomHeight = Math.floor(Math.random() * 90) + 10;
+        bar.style.height = randomHeight + '%';
+        if (randomHeight > 78) {
+          bar.className = 'flex-1 bg-cyber-warningRed rounded-t transition-all duration-100';
+        } else {
+          bar.className = 'flex-1 bg-cyber-neonGreen/80 rounded-t transition-all duration-100';
+        }
+      });
+    }, 120);
+
+    // Matrix Code Rain 背景畫布特效
+    const canvas = document.getElementById('matrixRain');
+    const ctx = canvas.getContext('2d');
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    const chars = '01ABCDEFXYZΩΨπµ#$&*+<>';
+    const fontSize = 12;
+    let columns = canvas.width / fontSize;
+    const drops = [];
+    for (let i = 0; i < columns; i++) {
+      drops[i] = 1;
+    }
+
+    function drawMatrix() {
+      ctx.fillStyle = 'rgba(3, 7, 18, 0.15)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#22c55e';
+      ctx.font = fontSize + 'px monospace';
+
+      for (let i = 0; i < drops.length; i++) {
+        const text = chars.charAt(Math.floor(Math.random() * chars.length));
+        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+        if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0;
+        }
+        drops[i]++;
+      }
+    }
+    setInterval(drawMatrix, 40);
+  </script>
+</body>
+</html>
